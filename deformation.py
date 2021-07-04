@@ -87,8 +87,8 @@ def compose( func, flow ):
     B,C,H,W = func.shape
     device = func.device
     
-    hrange = torch.range( 0, H-1, device=device )
-    wrange = torch.range( 0, W-1, device=device )
+    hrange = torch.arange( 0, H, device=device )
+    wrange = torch.arange( 0, W, device=device )
     gridx = wrange.repeat( H, 1 ).unsqueeze_(2)
     gridy = hrange.view( -1, 1).repeat( 1, W ).unsqueeze_(2)
     integer_grid = torch.cat([gridx, gridy], 2 )
@@ -101,7 +101,7 @@ def compose( func, flow ):
     grid = grid.repeat(B,1,1,1) + scale * flow
     
     # Return bilinear interpolation of func on new grid.
-    return F.grid_sample( func, grid, padding_mode='border' ).detach()
+    return F.grid_sample( func, grid, padding_mode='border',align_corners=True ).detach()
 
 
 def gaussian_filter( sigma=1, channels=1, device='cpu' ):
@@ -187,10 +187,22 @@ def create_tau( fval, gradf, d1x, d2x, smoothing_operator=None ):
     # rearrange for compatibility with compose(), B*2*H*W -> B*H*W*2
     return tau.permute( 0, 2, 3, 1 ).detach()
 
-def Tnorm( vector_fields ):
-    return (vector_fields**2).sum(-1).view(vector_fields.shape[0],-1).max(1)[0].sqrt()
+def Tnorm( vector_fields, norm_type,l,mu):
 
-def ADef( batch, model, ind_candidates = 1, max_iter = 50, max_norm = 'inf', overshoot = 1.0, smooth = 0., targeting = False, verbose = True ):
+    if norm_type == 'inf_norm':
+       return (vector_fields**2).sum(-1).view(vector_fields.shape[0],-1).max(1)[0].sqrt()
+
+    elif norm_type == 'elastic':
+
+        ux, uy = spatial_grad(vector_fields)
+
+        uik = 1/2*(torch.stack([ux,uy],dim=-1)+torch.stack([uy,ux],dim=-1))
+
+        eik = 1/2*l*((uik**2)[...,0,0]+(uik**2)[...,1,1])+mu*((uik**2)[...,1,0]+(uik**2)[...,0,1])
+        e_total = torch.sum(eik, dim=(1,2)).sqrt()
+        return e_total
+
+def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_norm', l=1.0,mu=1.0, max_norm = 5.0, overshoot = 1.0, smooth = 0., targeting = False, verbose = True ):
     '''
     Find an adversarial deformation of each image in batch w.r.t model.
 
@@ -318,7 +330,7 @@ def ADef( batch, model, ind_candidates = 1, max_iter = 50, max_norm = 'inf', ove
             tau_target = create_tau( f_target, Df_target, d1x, d2x, smoother )
             tau_target += tau_full[ind_images]
             
-            norm_target = Tnorm( tau_target )
+            norm_target = Tnorm( tau_target, norm_type, l, mu )
             ind_update = (norm_target < norm_min[ind_images])
             norm_min[ torch.tensor(ind_images)[ind_update] ] = norm_target[ ind_update ]
             tau_min[ torch.tensor(ind_images)[ind_update] ] = tau_target[ ind_update ]
@@ -388,7 +400,7 @@ def ADef( batch, model, ind_candidates = 1, max_iter = 50, max_norm = 'inf', ove
         os = (max_norm/norm_full).clamp( 1, overshoot ).view(B,1,1,1)
         try_overshoot = torch.tensor(try_overshoot)
         tau_full[ try_overshoot ] *= os[ try_overshoot ]
-        norm_full = Tnorm( tau_full )
+        norm_full = Tnorm( tau_full, norm_type, l, mu )
         batch_n = compose( batch, tau_full )
         F_n = model( batch_n )
         current_labels = F_n.max(1)[1]

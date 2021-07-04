@@ -33,6 +33,17 @@ ITRS = 40
 
     
 def mnist_loaders( batch_size, subset_size=60000 ):
+
+    if adversarial.lower() == 'affine':
+        affine_trans = transforms.Compose([transforms.ToTensor(),transforms.RandomAffine(degrees=180,translate=(0.5,0.5),shear=45)])
+        mnist_train = datasets.MNIST(path_to_resources, train=True, download=True, transform=affine_trans)
+        mnist_test = datasets.MNIST(path_to_resources, train=False, download=True, transform=affine_trans)
+
+    if adversarial.lower() == 'translate':
+        affine_trans = transforms.Compose([transforms.ToTensor(),transforms.RandomAffine(0,translate=(0.5,0.5))])
+        mnist_train = datasets.MNIST(path_to_resources, train=True, download=True, transform=affine_trans)
+        mnist_test = datasets.MNIST(path_to_resources, train=False, download=True, transform=affine_trans)
+
     mnist_train = datasets.MNIST(path_to_resources, train=True, download=True, transform=transforms.ToTensor())
     mnist_test = datasets.MNIST(path_to_resources, train=False, download=True, transform=transforms.ToTensor())
     subset = np.random.choice( 60000, subset_size )
@@ -135,6 +146,7 @@ if __name__ == '__main__':
         adversarial = 'clean'
         # ~ adversarial = 'pgd'
         # ~ adversarial = 'adef'
+    adversarial = 'translate'
     
     batch_size = 50
     # ~ n_epochs = 84 # Training on approx 100k batches if batch_size = 50
