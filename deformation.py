@@ -123,7 +123,7 @@ def gaussian_filter( sigma=1, channels=1, device='cpu' ):
     pad = (size-1)//2
     mean = (size - 1.)/2.
     
-    tt = (torch.range(0,size-1,device=device)-mean)/sigma
+    tt = (torch.arange(0,size,device=device)-mean)/sigma
     gauss = torch.exp( -0.5*tt**2 ).view( size, 1 )
     gauss = gauss/gauss.sum()
 
@@ -188,21 +188,37 @@ def create_tau( fval, gradf, d1x, d2x, smoothing_operator=None ):
     return tau.permute( 0, 2, 3, 1 ).detach()
 
 def Tnorm( vector_fields, norm_type,l,mu):
-
+    inf_norm=(vector_fields**2).sum(-1).view(vector_fields.shape[0],-1).max(1)[0].sqrt()
     if norm_type == 'inf_norm':
-       return (vector_fields**2).sum(-1).view(vector_fields.shape[0],-1).max(1)[0].sqrt()
+       return inf_norm
 
     elif norm_type == 'elastic':
 
         ux, uy = spatial_grad(vector_fields)
 
-        uik = 1/2*(torch.stack([ux,uy],dim=-1)+torch.stack([uy,ux],dim=-1))
-
-        eik = 1/2*l*((uik**2)[...,0,0]+(uik**2)[...,1,1])+mu*((uik**2)[...,1,0]+(uik**2)[...,0,1])
+        uik = 1/2*(torch.stack([ux,uy],dim=-1)+torch.transpose(torch.stack([ux,uy],dim=-1),-2,-1))
+        eik = l*((uik**2)[...,1,1]+(uik**2)[...,0,0])+mu*((uik**2)[...,0,1]+(uik**2)[...,1,0])
+        eki = mu*((uik**2)[...,1,1]+(uik**2)[...,0,0])+l*((uik**2)[...,0,1]+(uik**2)[...,1,0])
         e_total = torch.sum(eik, dim=(1,2)).sqrt()
-        return e_total
+        return e_total #+inf_norm
 
-def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_norm', l=1.0,mu=1.0, max_norm = 5.0, overshoot = 1.0, smooth = 0., targeting = False, verbose = True ):
+def Tnorm_vec(vector_fields, norm_type, l, mu):
+    inf_norm = (vector_fields ** 2).sum(-1).view(vector_fields.shape[0], -1).max(1)[0].sqrt()
+    if norm_type == 'inf_norm':
+        return inf_norm
+
+    elif norm_type == 'elastic':
+
+        ux, uy = spatial_grad(vector_fields)
+
+        uik = 1/2*(torch.stack([ux,uy],dim=-1)+torch.transpose(torch.stack([ux,uy],dim=-1),-2,-1))
+
+        eikl =  ((uik**2)[...,1,1]+(uik**2)[...,0,0])
+        eikmu =  ((uik**2)[...,0,1]+(uik**2)[...,1,0])
+        e_total = torch.sum(eikl-eikmu, dim=(1, 2))
+        return eikl-eikmu, e_total  # +inf_norm
+
+def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_norm', l=1.0,mu=1.0, max_norm = 5.0, overshoot = 0.0, smooth = 0., targeting = False, verbose = True ):
     '''
     Find an adversarial deformation of each image in batch w.r.t model.
 
@@ -299,7 +315,9 @@ def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_nor
     
     n = 0 # iteration number
     time0 = time.time()
-    while len(ind_images) > 0 and n < max_iter:
+
+    astatus = len(ind_images) > 0 and n < max_iter
+    while astatus:
         n += 1
         
         # Differentiate batch:
@@ -375,6 +393,7 @@ def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_nor
                 new_ind_images.remove( im_no )
                 iterations[im_no] = n
         ind_images = new_ind_images
+        astatus = len(ind_images) > 0 and n < max_iter
 
 
     
@@ -383,7 +402,7 @@ def ADef( batch, model, ind_candidates = 1, max_iter = 500, norm_type = 'inf_nor
     vprint('\nFinished!')
     vprint('\tTime: %.3fs' % (time1 - time0) )
     vprint('\tTime: %.3fs per iteration' % ((time1 - time0)/n) )
-    vprint('\tTime: %.3fs per image-iteration' % ((time1 - time0)/iterations.sum().item()) )
+#    vprint('\tTime: %.3fs per image-iteration' % ((time1 - time0)/iterations.sum().item()) )
     vprint('\tAvg. #iterations: %.3f' % iterations.mean().item())
     vprint('\tOriginal labels: ' + str(original_labels ) )
     vprint('\tCurrent labels: ' + str(current_labels) )

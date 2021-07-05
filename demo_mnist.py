@@ -7,20 +7,20 @@ from torch.autograd import Variable
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
-from deformation import ADef
+from deformation import ADef, Tnorm_vec
 from vector_fields import draw_vector_field
 
 from models_mnist import mnist_a, mnist_b
 
 from write_results import write_results
 
-def demo_mnist(adversarial, batch_size, sigma, l, mu, norm_type, plot_defs):
+def demo_mnist(adversarial, batch_size, sigma, l, mu, norm_type, plot_defs,with_gpu=True,max_norm= 3):
 
     # ADef config
     test_case= 'mnist'
     candidates = range(10)
     max_iter = 100
-    max_norm = np.inf
+    max_norm = max_norm #np.inf
     overshoot = 1.2
     strong_targets = False
     verbose = False
@@ -41,7 +41,9 @@ def demo_mnist(adversarial, batch_size, sigma, l, mu, norm_type, plot_defs):
     else:
         print('Model not found. Run \'train_mnist.py\' first!\nDeforming images w.r.t. an untrained model.')
         verbose = False
-    net.to(torch.device("cuda"))
+
+    if with_gpu:
+        net.to(torch.device("cuda"))
     net.eval()
     print('Model: ' + str(type(net)), 'sigma:',sigma,'l:',l,'mu:',mu)
 
@@ -53,8 +55,9 @@ def demo_mnist(adversarial, batch_size, sigma, l, mu, norm_type, plot_defs):
     batch, labels = next(iter( test_loader ))
 
     #convert to gpu
-    batch = batch.cuda()
-    labels = labels.cuda()
+    if with_gpu:
+        batch = batch.cuda()
+        labels = labels.cuda()
 
     x = Variable( batch)
     Fx = net.forward(x)
@@ -71,43 +74,46 @@ def demo_mnist(adversarial, batch_size, sigma, l, mu, norm_type, plot_defs):
                                 smooth=sigma, overshoot=overshoot,
                                 targeting=strong_targets, verbose=verbose )
 
-
     def_labels = def_data['deformed_labels']
     vector_fields = def_data['vector_fields']
+    eikdiff, e_total = Tnorm_vec(vector_fields.cpu(), norm_type, l, mu)
 
-    write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu)
+    write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu, e_total)
 
 
     if plot_defs:
         fig, axs = plt.subplots(2, batch_size)
-        # #if batch_size == 1:
-        for im_no in range(batch_size):
-        #
-        # im = batch[ 0, 0 ].numpy()
-        # def_im = def_batch[ 0, 0 ].numpy()
-        # axs[0].imshow( im, cmap='Greys', vmin=0, vmax=1 )
-        # draw_vector_field( axs[ 0], vector_fields[ 0 ], amp=3 )
-        # if not pred_labels[0] == labels[0]:
-        #     axs[0].set_title( 'Misclf. as %d' % pred_labels[0], color='red' )
-        # else:
-        #     axs[0].set_title( '%d' % pred_labels[0] )
-        # axs[1].imshow( def_im, cmap='Greys', vmin=0, vmax=1 )
-        # axs[1].set_title( '%d' % def_labels[0] )
-        # axs[0].set_ylabel('Original')
-        # axs[1].set_ylabel('Deformed')
-        # plt.show()
-        
-            im = batch[ im_no, 0 ].cpu().numpy()
-            def_im = def_batch[ im_no, 0 ].cpu().numpy()
-            axs[ 0, im_no ].imshow( im, cmap='Greys', vmin=0, vmax=1 )
-            draw_vector_field( axs[ 0, im_no ], vector_fields[ im_no ].cpu(), amp=3 )
-            if not pred_labels[im_no] == labels[im_no]:
-                axs[ 0, im_no ].set_title( 'Misclf. as %d' % pred_labels[im_no], color='red' )
+        if batch_size == 1:
+            im = batch[ 0, 0 ].cpu().numpy()
+            def_im = def_batch[ 0, 0 ].cpu().numpy()
+            axs[0].imshow( im, cmap='Greys', vmin=0, vmax=1 )
+            draw_vector_field( axs[ 0], vector_fields[ 0 ].cpu(), amp=3 )
+            if not pred_labels[0] == labels[0]:
+                axs[0].set_title( 'Misclf. as %d' % pred_labels[0], color='red' )
             else:
-                axs[ 0, im_no ].set_title( '%d' % pred_labels[im_no] )
-            axs[ 1, im_no ].imshow( def_im, cmap='Greys', vmin=0, vmax=1 )
-            axs[ 1, im_no ].set_title( '%d' % def_labels[im_no] )
-            axs[0,0].set_ylabel('Original')
-            axs[1,0].set_ylabel('Deformed')
-        plt.show()
-
+                axs[0].set_title( '%d' % pred_labels[0] )
+            axs[1].imshow( def_im, cmap='Greys', vmin=0, vmax=1 )
+            axs[1].set_title( '%d' % def_labels[0] )
+            axs[0].set_ylabel('Original')
+            axs[1].set_ylabel('Deformed')
+            plt.show()
+            eikdiff, e_total= Tnorm_vec(vector_fields.cpu(), norm_type, l, mu)
+            print(e_total,l,mu)
+            heatmap = plt.imshow(eikdiff[0], cmap='hot', interpolation='nearest')
+            plt.colorbar(heatmap)
+            plt.show()
+        else:
+            for im_no in range(batch_size):
+                im = batch[ im_no, 0 ].numpy()
+                def_im = def_batch[ im_no, 0 ].numpy()
+                axs[ 0, im_no ].imshow( im, cmap='Greys', vmin=0, vmax=1 )
+                draw_vector_field( axs[ 0, im_no ], vector_fields[ im_no ].cpu(), amp=3 )
+                if not pred_labels[im_no] == labels[im_no]:
+                    axs[ 0, im_no ].set_title( 'Misclf. as %d' % pred_labels[im_no], color='red' )
+                else:
+                    axs[ 0, im_no ].set_title( '%d' % pred_labels[im_no] )
+                axs[ 1, im_no ].imshow( def_im, cmap='Greys', vmin=0, vmax=1 )
+                axs[ 1, im_no ].set_title( '%d' % def_labels[im_no] )
+                axs[0,0].set_ylabel('Original')
+                axs[1,0].set_ylabel('Deformed')
+            plt.show()

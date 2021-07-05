@@ -1,14 +1,15 @@
 import pandas as pd
 import os
 import numpy as np
+from deformation import Tnorm, gaussian_filter
+import torch
+
+def write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu,e_total):
 
 
-def write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu):
 
-
-
-    data_np=np.empty((6,batch_size))
-    data_np_sum=np.empty(7)
+    data_np=np.empty((7,batch_size))
+    data_np_sum=np.empty(9)
 
     # for key in def_data.keys():
     #     data_dict[key] = def_data[key].tolist()
@@ -30,7 +31,8 @@ def write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu
     data_np[2] = def_data['norms'].cpu().numpy()
     data_np[3] = def_data['iterations'].cpu().numpy()
     data_np[4] = data_np[0] != data_np[1]
-    #data_np[5] = def_data['overshot'].numpy()
+    data_np[5] = e_total.cpu().numpy()
+    vf = def_data['vector_fields']
 
     data_np_sum[0] = batch_size
     data_np_sum[1] = sigma
@@ -39,6 +41,10 @@ def write_results(adversarial,test_case,norm_type,def_data,batch_size,sigma,l,mu
     data_np_sum[4] = np.sum(data_np[4])/data_np[4].shape[0]*100 #adef success rate
     data_np_sum[5] = l
     data_np_sum[6] = mu
+    data_np_sum[7] = np.sum(data_np[5])/data_np[5][data_np[5] != 0].shape[0]
+    #smoother = gaussian_filter(sigma=16)
+    #smooth_vf = smoother(torch.tensor(vf))
+    #data_np_sum[8] = Tnorm(smooth_vf,'norm_type',l,mu)-data_np[2]
 
     df = pd.DataFrame(data_np)
     df_sum = pd.DataFrame(data_np_sum)
